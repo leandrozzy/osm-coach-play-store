@@ -970,7 +970,7 @@ private fun AlertCard(text: String, onClick: (() -> Unit)? = null) {
 /** Passo a passo desenhado de como o app funciona. */
 @Composable
 private fun HowItWorks() {
-    val steps = listOf("▶" to "Abra o OSM\npelo app", "👆" to "Navegue\nnas telas", "🧠" to "O app lê\ne calcula", "⚡" to "Use a\ntática")
+    val steps = listOf("▶" to "Abra o jogo\npelo app", "🏠" to "Tela dos\n4 times", "👆" to "Entre em\ncada slot", "⚡" to "Use a\ntática")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         for ((i, s) in steps.withIndex()) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1501,6 +1501,12 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
 
         KilledBanner(ctx, batteryOk)
         SetupBanner(ctx, hasKey, onGoSettings)
+        if (data.slots.none { it.known }) {
+            AlertCard(
+                (if (Diag.needHub) "⚠ " else "🏁 ") + "Primeiro passo: durante a captura, abra a tela inicial do jogo com os seus 4 times (central dos slots). " +
+                    "É nela que o app aprende qual time é de cada slot. Depois entre em cada slot pelo pré-jogo."
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
         if (data.active) {
@@ -4391,7 +4397,7 @@ private fun Onboarding(onDone: () -> Unit) {
                 Text("🔔", fontSize = 56.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
                 Text("Pronto!", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 Text(
-                    "Toque em \"Abrir jogo e capturar\", permita a gravação de tela e navegue pelas telas do jogo: pré-jogo, plantel, calendário e treinamento. Depois toque em Encerrar.",
+                    "Toque em \"Abrir jogo e capturar\", permita a gravação de tela e abra primeiro a tela inicial do jogo com os seus 4 times e depois entre em cada slot: pré-jogo, plantel, calendário e treinamento. Depois toque em Encerrar.",
                     fontSize = 13.sp, color = C.MUTED, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
                 )
                 Spacer(Modifier.height(14.dp))

@@ -29,6 +29,8 @@ object Diag {
     @Volatile var serviceConnected = false
     /** A gravação de tela deste aparelho veio com vermelho e azul trocados (detectado pela barra do jogo). */
     @Volatile var swapRB = false
+    /** Telas do jogo lidas sem saber o slot porque a central dos 4 times ainda não foi vista. */
+    @Volatile var needHub = false
     @Volatile var lastOsmEventAt = 0L
     @Volatile var lastShotAt = 0L
     @Volatile var currentType = "—"

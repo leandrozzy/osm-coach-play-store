@@ -153,6 +153,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     private var calendarSaved = 0
     private var lastOsmAcceptedAt = 0L
     private var lastProbeAt = 0L
+    private var lastHubHintAt = 0L
     private var lastSampleAt = 0L
     private var imagesThisSession = 0
     private val mutex = Mutex()
@@ -404,6 +405,19 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             saveMachine(sessionId)
             Diag.currentSlot = machine.current ?: 0
+            // Instalação nova: o app ainda não viu a central com os 4 times, então não sabe de qual slot é a tela.
+            if (type == ScreenType.HUB) {
+                Diag.needHub = false
+            } else if (asg.slot == null && known.isEmpty() && machine.hubIdentities.isEmpty() &&
+                type in setOf(ScreenType.PREGAME, ScreenType.REPORT, ScreenType.SQUAD, ScreenType.CALENDAR, ScreenType.TRAINING, ScreenType.RESULT)
+            ) {
+                Diag.needHub = true
+                if (now - lastHubHintAt > 120000L) {
+                    lastHubHintAt = now
+                    Diag.log("Slot desconhecido: abra a central com os 4 times")
+                    CaptureService.instance?.notice("Abra a tela inicial do jogo com os seus 4 times (central dos slots): assim eu sei de qual slot é cada tela. O que já foi lido não se perde.")
+                }
+            }
 
             val own = ex.ownerTeam
             val cur = asg.slot
