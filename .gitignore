@@ -10,3 +10,4 @@ app/google-services.json
 *.jks
 *.p12
 *.keystore
+!app/debug.keystore

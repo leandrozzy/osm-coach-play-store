@@ -45,6 +45,13 @@ android {
     }
 
     signingConfigs {
+        // chave de teste fixa no repositório: os APKs de builds diferentes se atualizam sem desinstalar
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasReleaseKey) {
             create("release") {
                 storeFile = file(keystorePath!!)
