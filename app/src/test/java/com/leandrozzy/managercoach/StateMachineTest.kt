@@ -1,0 +1,105 @@
+package com.leandrozzy.managercoach
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class StateMachineTest {
+    // os prints reais dos testes são do time do apelido "leandrozzy"
+    init { Me.nick = "leandrozzy" }
+
+    private fun sm(): SlotStateMachine {
+        val m = SlotStateMachine()
+        m.onHub(Fx.hubCards())
+        return m
+    }
+
+    private fun enter(m: SlotStateMachine, team: String, round: Int): Assignment =
+        m.onScreen(ScreenType.PREGAME, listOf(team), round, null, emptyList())
+
+    @Test fun centralToS1ThenInheritsUntilReturningToCentral() {
+        val m = sm()
+        assertEquals(1, enter(m, "Tobol", 25).slot)
+        assertEquals(1, m.onScreen(ScreenType.SQUAD, emptyList(), null, "Tobol", emptyList()).slot)
+        assertEquals(1, m.onScreen(ScreenType.MARKET, emptyList(), null, null, emptyList()).slot)
+        m.onHub(Fx.hubCards())
+        assertNull(m.current)
+        assertNull(m.onScreen(ScreenType.MARKET, emptyList(), null, null, emptyList()).slot)
+    }
+
+    @Test fun centralToS2() {
+        val m = sm()
+        assertEquals(2, enter(m, "Levski Sofia", 21).slot)
+    }
+
+    @Test fun centralToS3() {
+        val m = sm()
+        assertEquals(3, enter(m, "Nasaf", 10).slot)
+    }
+
+    @Test fun centralToS4ByRoundWhenHubShowsGroupNameInsteadOfTeam() {
+        val m = sm()
+        val a = enter(m, "Universidad de Chile", 4)
+        assertEquals(4, a.slot)
+        assertEquals(0.65, a.confidence, 0.001)
+    }
+
+    @Test fun adsSystemUiAndLauncherNeverChangeSlot() {
+        val m = sm()
+        enter(m, "Tobol", 25)
+        assertEquals(1, m.onScreen(ScreenType.NON_OSM, emptyList(), null, null, emptyList()).slot)
+        assertEquals(1, m.onScreen(ScreenType.NOISE, emptyList(), null, null, emptyList()).slot)
+        assertEquals(1, m.current)
+    }
+
+    @Test fun unknownPregameDoesNotInventASlot() {
+        val m = sm()
+        val a = enter(m, "Time Misterioso", 99)
+        assertNull(a.slot)
+    }
+
+    @Test fun recognizesSlotFromStoredIdentityWithoutHub() {
+        val m = SlotStateMachine()
+        val known = listOf(SlotIdentity(3, setOf("nasaf", "uzmvsbay"), 10), SlotIdentity(1, setOf("tobol"), 25))
+        val a = m.onScreen(ScreenType.PREGAME, listOf("Nasaf"), 10, null, known)
+        assertEquals(3, a.slot)
+    }
+
+    @Test fun ambiguousRoundOnlyReturnsNull() {
+        val m = SlotStateMachine()
+        val known = listOf(SlotIdentity(1, setOf("aaaa"), 5), SlotIdentity(2, setOf("bbbb"), 5))
+        assertNull(m.onScreen(ScreenType.PREGAME, listOf("Outro Nome"), 5, null, known).slot)
+    }
+
+    @Test fun restoredStateKeepsSlotAfterProcessDeath() {
+        val m = SlotStateMachine()
+        m.restore(2, false, emptyList())
+        assertEquals(2, m.onScreen(ScreenType.CALENDAR, emptyList(), null, null, emptyList()).slot)
+    }
+
+    @Test fun matchReportFromTheHubFindsItsSlotByMyTeam() {
+        val m = SlotStateMachine()
+        m.onHub(listOf(HubCard(1, "Tobol", "Cazaquistão", 25, 34), HubCard(3, "Nasaf", "Superliga", 10, 30)))
+        // relatório aberto direto da central: sem slot herdado, o meu time (Nasaf) decide
+        val a = m.onScreen(ScreenType.RESULT, listOf("Nasaf", "Pakhtakor"), null, "Nasaf", emptyList())
+        assertEquals(3, a.slot)
+        // rolando a tela (sem cabeçalho) continua no mesmo slot
+        assertEquals(3, m.onScreen(ScreenType.RESULT, emptyList(), null, null, emptyList()).slot)
+    }
+
+    @Test fun rivalSquadFindsItsSlotWithoutPregame() {
+        val m = sm()
+        val known = listOf(
+            SlotIdentity(3, setOf(Txt.key("Nasaf")), 12, setOf(Txt.key("Surkhan"), Txt.key("natan bianque_5"))),
+            SlotIdentity(4, setOf(Txt.key("Universidad de Chile")), 5, setOf(Txt.key("Colo-Colo")))
+        )
+        // entrou no slot por uma tela sem nome do time: o plantel do rival (nome completo) diz que é o S3
+        assertEquals(3, m.onScreen(ScreenType.SQUAD, emptyList(), null, "FK Surkhan", known).slot)
+        assertEquals(3, m.onScreen(ScreenType.REPORT, emptyList(), null, null, known).slot)
+        m.onHub(Fx.hubCards())
+        assertEquals(4, m.onScreen(ScreenType.SQUAD, emptyList(), null, "Colo-Colo", known).slot)
+        // time desconhecido: não inventa slot
+        m.onHub(Fx.hubCards())
+        assertNull(m.onScreen(ScreenType.SQUAD, emptyList(), null, "Pakhtakor", known).slot)
+    }
+}

@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+*.apk
+
+# Firebase: vem dos secrets do CI (GOOGLE_SERVICES_JSON)
+app/google-services.json
+*.jks
+*.p12
+*.keystore
