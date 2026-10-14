@@ -130,11 +130,7 @@ class CaptureService : Service() {
                 finish(processSession = true)
             }
         }, Handler(Looper.getMainLooper()))
-        val bounds = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
-        // largura de até 1080 px: o texto continua legível para o OCR e a memória fica menor
-        val scale = if (bounds.width() > 1080) 1080f / bounds.width() else 1f
-        val w = (bounds.width() * scale).toInt()
-        val h = (bounds.height() * scale).toInt()
+        val (w, h) = captureSize()
         val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
         reader = r
         display = try {
@@ -199,8 +195,44 @@ class CaptureService : Service() {
         }
     }
 
+    /**
+     * Tamanho da gravação na orientação ATUAL da tela (o jogo roda deitado): lado menor até 1080 px, o texto continua
+     * legível para o OCR e a memória fica menor.
+     */
+    private fun captureSize(): Pair<Int, Int> {
+        val d = getSystemService(DisplayManager::class.java).getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val p = android.graphics.Point()
+        @Suppress("DEPRECATION")
+        d.getRealSize(p)
+        val short = minOf(p.x, p.y).coerceAtLeast(1)
+        val scale = if (short > 1080) 1080f / short else 1f
+        return Pair((p.x * scale).toInt(), (p.y * scale).toInt())
+    }
+
+    /**
+     * Girou a tela (o jogo é deitado, o app é em pé): a gravação acompanha. Sem isso o Android encolhe a imagem
+     * deitada dentro de um quadro em pé, com faixas pretas, e nada bate com as posições do jogo.
+     */
+    private fun followRotation() {
+        val r = reader ?: return
+        val vd = display ?: return
+        val (w, h) = captureSize()
+        if (w == r.width && h == r.height) return
+        try {
+            val nr = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+            vd.resize(w, h, resources.displayMetrics.densityDpi)
+            vd.surface = nr.surface
+            reader = nr
+            r.close()
+            Diag.log("Gravação ajustada à tela: ${w}x$h")
+        } catch (e: Exception) {
+            Diag.lastError = "Gravação (girar): " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
     /** Último quadro da gravação como bitmap (sem a sobra de cada linha que o ImageReader acrescenta). */
     private fun grab(): Bitmap? {
+        followRotation()
         val img = reader?.acquireLatestImage() ?: return null
         try {
             val plane = img.planes[0]
@@ -208,13 +240,57 @@ class CaptureService : Service() {
             val pad = plane.rowStride - ps * img.width
             val wide = Bitmap.createBitmap(img.width + pad / ps, img.height, Bitmap.Config.ARGB_8888)
             wide.copyPixelsFromBuffer(plane.buffer)
-            if (pad == 0) return wide
-            val exact = Bitmap.createBitmap(wide, 0, 0, img.width, img.height)
-            wide.recycle()
-            return exact
+            val exact = if (pad == 0) wide else Bitmap.createBitmap(wide, 0, 0, img.width, img.height).also { wide.recycle() }
+            return trimBars(exact)
         } finally {
             img.close()
         }
+    }
+
+    /**
+     * Faixas pretas em volta da imagem (quadro de outra orientação, antes de a gravação acompanhar a rotação):
+     * corta para sobrar só o conteúdo.
+     */
+    private fun trimBars(b: Bitmap): Bitmap {
+        val w = b.width
+        val h = b.height
+        fun darkRow(y: Int): Boolean {
+            var i = 0
+            while (i < 24) {
+                val c = b.getPixel((w * (i + 0.5f) / 24f).toInt(), y)
+                if (((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF) > 36) return false
+                i++
+            }
+            return true
+        }
+        fun darkCol(x: Int): Boolean {
+            var i = 0
+            while (i < 24) {
+                val c = b.getPixel(x, (h * (i + 0.5f) / 24f).toInt())
+                if (((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF) > 36) return false
+                i++
+            }
+            return true
+        }
+        var top = 0
+        while (top < h / 2 && darkRow(top)) top += 2
+        var bottom = h - 1
+        while (bottom > h / 2 && darkRow(bottom)) bottom -= 2
+        var left = 0
+        while (left < w / 2 && darkCol(left)) left += 2
+        var right = w - 1
+        while (right > w / 2 && darkCol(right)) right -= 2
+        val cw = right - left + 1
+        val ch = bottom - top + 1
+        // só corta faixa de verdade (mais de 4% de cada lado) e nunca a tela inteira escura
+        val barV = top > h * 0.04f && (h - 1 - bottom) > h * 0.04f
+        val barH = left > w * 0.04f && (w - 1 - right) > w * 0.04f
+        if ((!barV && !barH) || cw < w / 4 || ch < h / 4) return b
+        val x0 = if (barH) left else 0
+        val y0 = if (barV) top else 0
+        val out = Bitmap.createBitmap(b, x0, y0, if (barH) cw else w, if (barV) ch else h)
+        b.recycle()
+        return out
     }
 
     /** Aviso curto (ex.: tática montada diferente da gerada), em notificação. */
