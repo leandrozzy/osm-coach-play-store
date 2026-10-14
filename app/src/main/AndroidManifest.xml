@@ -7,6 +7,8 @@
     <!-- captura pela gravação de tela do Android (o usuário permite a cada captura) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- botões flutuantes durante a captura (opcional: o usuário libera em "Sobrepor a outros apps") -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- compra do Premium (Google Play Billing) -->
     <uses-permission android:name="com.android.vending.BILLING" />
 

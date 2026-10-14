@@ -87,7 +87,20 @@ object ImageIo {
         val px = IntArray(pw * ph)
         small.getPixels(px, 0, pw, 0, 0, pw, ph)
         if (small !== bmp) small.recycle()
-        return PixelProbe.Img(pw, ph, px)
+        val img = PixelProbe.Img(pw, ph, px)
+        return if (Diag.swapRB) PixelProbe.swapRB(img) else img
+    }
+
+    /** Amostras de quadros descartados (pequenas): vão no diagnóstico para ver o que a gravação entregou. */
+    fun saveDiscardSample(ctx: Context, bmp: Bitmap, at: Long) {
+        try {
+            val dir = File(ctx.filesDir, "discard").apply { mkdirs() }
+            val w = 360
+            val scaled = Bitmap.createScaledBitmap(bmp, w, (w.toFloat() * bmp.height / bmp.width).toInt().coerceAtLeast(1), true)
+            FileOutputStream(File(dir, "$at.jpg")).use { scaled.compress(Bitmap.CompressFormat.JPEG, 70, it) }
+            if (scaled !== bmp) scaled.recycle()
+            dir.listFiles()?.sortedByDescending { it.name }?.drop(12)?.forEach { it.delete() }
+        } catch (e: Exception) { }
     }
 }
 
@@ -139,6 +152,8 @@ class FramePipeline private constructor(private val ctx: Context) {
     private var tacticSaved = 0
     private var calendarSaved = 0
     private var lastOsmAcceptedAt = 0L
+    private var lastProbeAt = 0L
+    private var lastSampleAt = 0L
     private var imagesThisSession = 0
     private val mutex = Mutex()
 
@@ -295,18 +310,37 @@ class FramePipeline private constructor(private val ctx: Context) {
             dupCounted = false
 
             val now = System.currentTimeMillis()
-            val img = ImageIo.toImg(bmp)
-            val topBar = PixelProbe.isOsmTopBar(img)
+            var img = ImageIo.toImg(bmp)
+            var topBar = PixelProbe.isOsmTopBar(img)
+            var hub = PixelProbe.hubBackdrop(img)
+            if (!topBar && !hub && !Diag.swapRB) {
+                // alguns aparelhos entregam a gravação de tela com vermelho e azul trocados: confere e corrige
+                val sw = PixelProbe.swapRB(img)
+                if (PixelProbe.isOsmTopBar(sw) || PixelProbe.hubBackdrop(sw)) {
+                    Diag.swapRB = true
+                    Diag.log("Gravação com cores trocadas (vermelho/azul): corrigido")
+                    img = sw
+                    topBar = PixelProbe.isOsmTopBar(sw)
+                    hub = PixelProbe.hubBackdrop(sw)
+                }
+            }
             // Telas cheias do jogo sem a barra superior (ex.: análise do rival) ainda são do OSM: se o jogo estava
             // em primeiro plano há pouco, lê o texto e decide por ele (anúncios não têm o vocabulário do jogo).
             val recentlyOsm = now - lastOsmAcceptedAt < 90000L
-            if (!topBar && !PixelProbe.hubBackdrop(img) && !recentlyOsm) {
+            // Mesmo sem a barra (cores diferentes num aparelho), a cada 5 s lê o texto e decide pelo vocabulário do jogo.
+            val probe = !topBar && !hub && !recentlyOsm && now - lastProbeAt >= 5000L
+            if (!topBar && !hub && !recentlyOsm && !probe) {
                 Diag.discarded.incrementAndGet()
                 Diag.currentType = ScreenType.NON_OSM.name
-                Diag.log("Descartada: não é tela do OSM (anúncio ou outro app)")
+                Diag.log("Descartada: não é tela do jogo (anúncio ou outro app)")
+                if (now - lastSampleAt > 45000L) {
+                    lastSampleAt = now
+                    ImageIo.saveDiscardSample(ctx, bmp, now)
+                }
                 lastProcessed = h
                 return
             }
+            if (probe) lastProbeAt = now
 
             val ocr = OcrEngine.read(bmp)
             lastProcessedAt = now

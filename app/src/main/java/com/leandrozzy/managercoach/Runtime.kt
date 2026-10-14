@@ -27,6 +27,8 @@ object AppVisible {
 /** Contadores e estado para a tela de diagnóstico. */
 object Diag {
     @Volatile var serviceConnected = false
+    /** A gravação de tela deste aparelho veio com vermelho e azul trocados (detectado pela barra do jogo). */
+    @Volatile var swapRB = false
     @Volatile var lastOsmEventAt = 0L
     @Volatile var lastShotAt = 0L
     @Volatile var currentType = "—"
@@ -267,6 +269,8 @@ object Control {
         val id = activeSession(ctx) ?: return
         val dao = CoachDb.get(ctx).dao()
         prefs(ctx).edit().remove("active_session").apply()
+        // para a gravação de tela na hora (sem esperar a próxima volta do laço)
+        CaptureService.instance?.finish(processSession = false)
         val s = dao.session(id)
         if (s != null) dao.putSession(s.copy(endedAt = System.currentTimeMillis(), state = "processing"))
         AppScope.scope.launch {

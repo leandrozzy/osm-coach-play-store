@@ -19,7 +19,15 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.annotation.SuppressLint
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -145,6 +153,7 @@ class CaptureService : Service() {
         instance = this
         Diag.serviceConnected = true
         Health.beat(applicationContext)
+        mainHandler.post { showOverlay() }
         startLoop()
     }
 
@@ -166,7 +175,15 @@ class CaptureService : Service() {
                     continue
                 }
                 try {
-                    val bmp = grab()
+                    // os botões flutuantes somem por um instante para não sair na imagem lida
+                    val hid = withContext(Dispatchers.Main) {
+                        val b = overlayBox
+                        if (b != null && b.alpha > 0f) { b.alpha = 0f; true } else false
+                    }
+                    if (hid) delay(140L)
+                    val bmp = try { grab() } finally {
+                        if (hid) withContext(Dispatchers.Main) { overlayBox?.alpha = 0.95f }
+                    }
                     if (bmp != null) {
                         try {
                             pipeline.onShot(sid, bmp)
@@ -217,8 +234,201 @@ class CaptureService : Service() {
         }
     }
 
-    /** Mantido para as telas do app (antes trocava o rótulo do botão flutuante). */
-    fun refreshOverlay() {}
+    /** Chamado pelas telas do app ao abrir/fechar: troca o rótulo do botão de alternar. */
+    fun refreshOverlay() {
+        mainHandler.post { toggleView?.text = if (AppVisible.resumed) "⚽ Jogo" else "📱 App" }
+    }
+
+    // ------------------------------------------------------------ botões flutuantes (permissão "sobrepor a outros apps")
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var overlayBox: LinearLayout? = null
+    private var toggleView: TextView? = null
+    private var endView: TextView? = null
+    private var panelView: TextView? = null
+    private var armedAt = 0L
+
+    private fun chip(text: String, color: Int, dp: Float): TextView = TextView(this).apply {
+        this.text = text
+        setTextColor(android.graphics.Color.WHITE)
+        textSize = 12f
+        setPadding((12 * dp).toInt(), (7 * dp).toInt(), (12 * dp).toInt(), (7 * dp).toInt())
+        background = GradientDrawable().apply {
+            cornerRadius = 40 * dp
+            setColor(color)
+        }
+    }
+
+    /** Onde os botões estão (0..1): o OCR ignora o que cair embaixo deles. */
+    private fun markBounds(v: View) {
+        val loc = IntArray(2)
+        v.getLocationOnScreen(loc)
+        val sw = resources.displayMetrics.widthPixels.toFloat()
+        val sh = resources.displayMetrics.heightPixels.toFloat()
+        if (sw <= 0f || sh <= 0f) return
+        Overlay.bounds = floatArrayOf(loc[0] / sw, loc[1] / sh, (loc[0] + v.width) / sw, (loc[1] + v.height) / sh)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showOverlay() {
+        if (overlayBox != null || !android.provider.Settings.canDrawOverlays(this)) return
+        val wm = getSystemService(WindowManager::class.java)
+        val dp = resources.displayMetrics.density
+        val toggle = chip(if (AppVisible.resumed) "⚽ Jogo" else "📱 App", 0xE61F6BFF.toInt(), dp)
+        val tactic = chip("📋 Tática", 0xE6B8860B.toInt(), dp)
+        val end = chip("■ Encerrar", 0xE6D32F2F.toInt(), dp)
+        val maxW = (resources.displayMetrics.widthPixels * 0.72f).toInt()
+        val panel = TextView(this).apply {
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 12f
+            maxWidth = maxW
+            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+            background = GradientDrawable().apply {
+                cornerRadius = 14 * dp
+                setColor(0xF20B1220.toInt())
+            }
+            visibility = View.GONE
+        }
+        fun gap(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (6 * dp).toInt() }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            alpha = 0.95f
+            addView(toggle)
+            addView(tactic, gap())
+            addView(end, gap())
+            addView(panel, gap())
+        }
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = (resources.displayMetrics.heightPixels * 0.40f).toInt()
+        }
+        fun dragOrTap(v: View, onTap: () -> Unit) {
+            var downX = 0f
+            var downY = 0f
+            var startX = 0
+            var startY = 0
+            var moved = false
+            v.setOnTouchListener { _: View, e: MotionEvent ->
+                when (e.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; moved = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = e.rawX - downX
+                        val dy = e.rawY - downY
+                        if (kotlin.math.abs(dx) > 12 * dp || kotlin.math.abs(dy) > 12 * dp) moved = true
+                        if (moved) {
+                            lp.x = startX + dx.toInt()
+                            lp.y = startY + dy.toInt()
+                            try { wm.updateViewLayout(box, lp) } catch (ex: Exception) { }
+                            box.post { markBounds(box) }
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> if (!moved) onTap()
+                }
+                true
+            }
+        }
+        dragOrTap(toggle) { onToggleTap() }
+        dragOrTap(tactic) { onTacticTap() }
+        dragOrTap(end) { onEndTap() }
+        dragOrTap(panel) { panel.visibility = View.GONE }
+        box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> markBounds(v) }
+        try {
+            wm.addView(box, lp)
+            overlayBox = box
+            toggleView = toggle
+            endView = end
+            panelView = panel
+        } catch (e: Exception) {
+            Diag.lastError = "Botões flutuantes: " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    private fun removeOverlay() {
+        val v = overlayBox ?: return
+        Overlay.bounds = null
+        overlayBox = null
+        toggleView = null
+        endView = null
+        panelView = null
+        try {
+            getSystemService(WindowManager::class.java).removeView(v)
+        } catch (e: Exception) { }
+    }
+
+    /** No app vai para o jogo; no jogo volta para o app. A captura continua. */
+    private fun onToggleTap() {
+        try {
+            if (AppVisible.resumed) {
+                val i = packageManager.getLaunchIntentForPackage(OSM_PACKAGE) ?: return
+                startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else {
+                startActivity(
+                    Intent(this, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                )
+            }
+        } catch (e: Exception) {
+            Diag.lastError = "Alternar app/jogo: " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /** Encerrar pede um segundo toque (evita encerrar sem querer ao arrastar). */
+    private fun onEndTap() {
+        val tv = endView ?: return
+        val now = System.currentTimeMillis()
+        if (armedAt == 0L || now - armedAt > 4000L) {
+            armedAt = now
+            tv.text = "Toque de novo"
+            tv.postDelayed({ if (armedAt != 0L && System.currentTimeMillis() - armedAt >= 4000L) { armedAt = 0L; tv.text = "■ Encerrar" } }, 4100L)
+            return
+        }
+        armedAt = 0L
+        android.widget.Toast.makeText(this, "Captura encerrada. Processando…", android.widget.Toast.LENGTH_SHORT).show()
+        finish(processSession = true)
+    }
+
+    /** Painel com a tática do slot atual, para montar no jogo sem trocar de app. */
+    private fun onTacticTap() {
+        val pv = panelView ?: return
+        if (pv.visibility == View.VISIBLE) {
+            pv.visibility = View.GONE
+            return
+        }
+        val app = applicationContext
+        scope.launch {
+            val text = try {
+                val slot = Diag.currentSlot
+                if (slot <= 0) "Entre no slot (pré-jogo) para eu saber qual tática mostrar."
+                else if (!Premium.allows(slot)) "S$slot faz parte do Premium."
+                else {
+                    val repo = Repo(app)
+                    val p = repo.dao.plan(slot, "tactic")
+                    val j = p?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+                    if (p == null || j == null) "S$slot: nenhuma tática gerada. Gere no app (aba Tática)."
+                    else {
+                        val ok = Director.tacticValid(j, p.at, repo.fieldMap(slot), System.currentTimeMillis())
+                        "S$slot • vs ${j.optString("rival")}\n" + (if (ok) "" else "⚠ Tática de outro jogo: gere de novo.\n") + Director.tacticSummary(j)
+                    }
+                }
+            } catch (e: Exception) {
+                "Não consegui carregar a tática: " + (e.message ?: e.javaClass.simpleName)
+            }
+            withContext(Dispatchers.Main) {
+                panelView?.text = text + "\n(toque para fechar)"
+                panelView?.visibility = View.VISIBLE
+            }
+        }
+    }
 
     @Synchronized
     fun finish(processSession: Boolean) {
@@ -232,6 +442,7 @@ class CaptureService : Service() {
         reader = null
         projection = null
         instance = null
+        mainHandler.post { removeOverlay() }
         Diag.serviceConnected = false
         if (processSession && Control.activeSession(applicationContext) != null) {
             AppScope.scope.launch { Control.end(applicationContext) }

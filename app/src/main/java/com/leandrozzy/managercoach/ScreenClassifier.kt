@@ -20,7 +20,9 @@ object ScreenClassifier {
         // Sem a barra do OSM só passa se o texto tiver o vocabulário do jogo (análise do rival, calendário etc.).
         val osmish = listOf(
             "formacao", "marcacao", "desarme", "estilo de jogo", "jornada", "analista", "relatorio", "adversario",
-            "plantel", "estadio", "campo de treinamento", "fora de jogo", "temporizacao", "capacidade"
+            "plantel", "estadio", "campo de treinamento", "fora de jogo", "temporizacao", "capacidade",
+            "jogo rapido", "preparacao para o jogo", "arbitro", "calendario", "classificacao", "lista de transferencias",
+            "vender jogadores", "equipa inicial", "treinador de", "treinador universal", "para treinar"
         ).count { t.contains(it) } >= 3
         if (!osmTopBar && !osmish) return ScreenType.NON_OSM
 

@@ -82,4 +82,11 @@ class PixelProbeTest {
         assertEquals(0, FrameHash.distance(a, same))
         assertTrue(FrameHash.distance(a, other) >= 12)
     }
+
+    @Test fun swapRedAndBlue() {
+        val img = PixelProbe.Img(2, 1, intArrayOf(0xFF112233.toInt(), 0x80AABBCC.toInt()))
+        val sw = PixelProbe.swapRB(img)
+        org.junit.Assert.assertEquals(0xFF332211.toInt(), sw.px[0])
+        org.junit.Assert.assertEquals(0x80CCBBAA.toInt(), sw.px[1])
+    }
 }

@@ -11,6 +11,12 @@ import kotlin.math.min
 object PixelProbe {
     class Img(val w: Int, val h: Int, val px: IntArray)
 
+    /** Mesma imagem com vermelho e azul trocados. */
+    fun swapRB(img: Img): Img = Img(img.w, img.h, IntArray(img.px.size) { i ->
+        val c = img.px[i]
+        (c and 0xFF00FF00.toInt()) or ((c shr 16) and 0xFF) or ((c and 0xFF) shl 16)
+    })
+
     private fun hsv(c: Int, out: FloatArray) {
         val r = (c shr 16 and 0xFF) / 255f
         val g = (c shr 8 and 0xFF) / 255f

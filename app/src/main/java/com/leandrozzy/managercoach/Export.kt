@@ -248,6 +248,12 @@ object DiagExport {
                 used += f.length()
                 images++
             }
+            // amostras do que a gravação entregou e foi descartado (para ver por que não foi lido)
+            File(ctx.filesDir, "discard").listFiles()?.sortedBy { it.name }?.forEach { f ->
+                z.putNextEntry(ZipEntry("descartadas/" + f.name))
+                f.inputStream().use { it.copyTo(z) }
+                z.closeEntry()
+            }
             z.putNextEntry(ZipEntry("LEIA-ME.txt"))
             z.write(
                 ("Diagnóstico do Manager Coach gerado em $stamp.\n" +

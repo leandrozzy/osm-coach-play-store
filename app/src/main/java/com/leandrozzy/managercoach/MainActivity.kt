@@ -3934,6 +3934,10 @@ private fun SettingsTab() {
         }
         Fold("🎥", "Captura do jogo", if (CaptureService.running) "ligada" else null) {
             StatusLight(CaptureService.running, if (CaptureService.running) "Gravação de tela ligada" else "Gravação de tela desligada (ligue em Hoje)")
+            StatusLight(android.provider.Settings.canDrawOverlays(ctx), "Botões flutuantes por cima do jogo")
+            if (!android.provider.Settings.canDrawOverlays(ctx)) {
+                OutlinedButton(onClick = { openOverlaySettings(ctx) }, modifier = Modifier.fillMaxWidth()) { Text("Permitir botões flutuantes") }
+            }
             StatusLight(batteryUnrestricted(ctx), "Bateria sem restrição (opcional: evita o Android parar a captura)")
             if (!batteryUnrestricted(ctx)) {
                 OutlinedButton(onClick = { openBatterySettings(ctx) }, modifier = Modifier.fillMaxWidth()) { Text("Bateria: não otimizar este app") }
@@ -4019,6 +4023,17 @@ private fun openUrl(ctx: Context, url: String) {
     }
 }
 
+private fun openOverlaySettings(ctx: Context) {
+    try {
+        ctx.startActivity(
+            Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (e: Exception) {
+        openSettings(ctx, android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, true)
+    }
+}
+
 /** Inicia a captura de qualquer tela do app (botão de Hoje e botão do topo dos slots). */
 private val LocalStartCapture = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> { {} }
 
@@ -4054,17 +4069,50 @@ private fun rememberCaptureStarter(): () -> Unit {
             }
         }
     }
+    var askOverlay by remember { mutableStateOf(false) }
+    // botões flutuantes: pergunta uma vez (a captura funciona sem eles, pela notificação)
+    val maybeAskOverlay: () -> Unit = {
+        if (!android.provider.Settings.canDrawOverlays(ctx) && Settings.get(ctx, "overlay_asked", "") != "1") askOverlay = true else go()
+    }
     if (disclose) {
         CaptureDisclosure(
             onOk = {
                 disclose = false
                 Settings.put(ctx, "capture_disclosed", "1")
-                go()
+                maybeAskOverlay()
             },
             onCancel = { disclose = false }
         )
     }
-    return { if (Settings.get(ctx, "capture_disclosed", "") != "1") disclose = true else go() }
+    if (askOverlay) {
+        AlertDialog(
+            onDismissRequest = { askOverlay = false },
+            containerColor = C.SURFACE,
+            title = { Text("🔘 Botões flutuantes", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Com a permissão \"Sobrepor a outros apps\", aparecem por cima do jogo os botões 📱 App / ⚽ Jogo (para alternar), " +
+                        "📋 Tática e ■ Encerrar. Sem ela, use a notificação \"Lendo o jogo\".\n\nNa tela que vai abrir, ligue a chave do Manager Coach IA e volte.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    askOverlay = false
+                    Settings.put(ctx, "overlay_asked", "1")
+                    openOverlaySettings(ctx)
+                }) { Text("Permitir") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    askOverlay = false
+                    Settings.put(ctx, "overlay_asked", "1")
+                    go()
+                }) { Text("Sem botões") }
+            }
+        )
+    }
+    return { if (Settings.get(ctx, "capture_disclosed", "") != "1") disclose = true else maybeAskOverlay() }
 }
 
 /** Aviso claro antes da primeira captura: o que é capturado, onde é processado e o que sai do celular. */
